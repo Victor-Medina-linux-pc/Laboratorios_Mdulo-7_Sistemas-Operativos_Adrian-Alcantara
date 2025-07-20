@@ -1,0 +1,220 @@
+Comandos usados práctica 1
+============================================
+servidor
+
+# Instalar NFS
+sudo apt update
+sudo apt install nfs-kernel-server -y
+
+# Crear carpeta compartida y archivos
+mkdir -p /srv/nfs/OS3
+cd /srv/nfs/OS3
+for i in {1..100}; do echo "Archivo $i" > "Adrian$i.txt"; done
+
+# Asignar permisos adecuados
+sudo chown -R nobody:nogroup /srv/nfs/OS3
+sudo chmod -R 755 /srv/nfs/OS3
+
+# Configurar /etc/exports
+echo "/srv/nfs/OS3 192.168.1.0/24(rw,sync,no_subtree_check)" | sudo tee -a /etc/exports
+
+# Aplicar configuración
+sudo exportfs -a
+sudo systemctl enable --now nfs-server
+
+Cliente NFS
+
+# Instalar cliente NFS
+sudo apt install nfs-common -y
+
+# Crear punto de montaje
+sudo mkdir -p /mnt/nfs/OS3
+
+# Montar directorio desde el servidor (ajusta la IP)
+sudo mount 192.168.1.1:/srv/nfs/OS3 /mnt/nfs/OS3
+
+# Verificar archivos
+ls /mnt/nfs/OS3
+
+# Montaje automático al inicio: editar fstab
+echo "192.168.1.1:/srv/nfs/OS3 /mnt/nfs/OS3 nfs defaults 0 0" | sudo tee -a /etc/fstab
+
+# Reiniciar para probar
+sudo reboot
+
+Comandos usados práctica 2
+============================================
+
+# Instalar Samba
+sudo apt install samba -y
+
+# Crear carpeta compartida
+sudo mkdir -p /srv/samba/OS3
+cd /srv/samba/OS3
+for i in {1..100}; do echo "Archivo $i" > "adrian$i.txt"; done
+
+# Crear grupo y usuario
+sudo groupadd sambagrupo
+sudo useradd -M -s /sbin/nologin sambauser
+sudo smbpasswd -a sambauser  # Establece contraseña
+
+# Cambiar permisos
+sudo chown -R sambauser:sambagrupo /srv/samba/OS3
+sudo chmod -R 770 /srv/samba/OS3
+
+
+# Abrir archivo de configuración
+sudo nano /etc/samba/smb.conf
+
+[OS3]
+   path = /srv/samba/OS3
+   valid users = sambauser
+   read only = no
+   browsable = yes
+
+# Reiniciar servicio
+sudo systemctl restart smbd
+sudo systemctl enable smbd
+
+Cliente Windows
+Abre el Explorador de archivos.
+
+Click derecho en “Este equipo” → “Conectar unidad de red”.
+
+Selecciona una letra y escribe:
+
+
+\\192.168.1.1\OS3
+
+Comandos usados práctica 3
+============================================
+
+Configuración de red y hostname en el servidor
+
+sudo hostnamectl set-hostname dc
+
+sudo tee /etc/hosts <<EOF
+127.0.0.1    localhost
+192.168.1.50   dc.so3.inet dc
+EOF
+
+# Verificar
+hostname -f
+ping -c2 dc.so3.inet
+
+
+Resolver DNS internamente
+Desactiva systemd-resolved y configura el DNS que usarás para el dominio:
+
+
+
+sudo systemctl disable --now systemd-resolved
+sudo unlink /etc/resolv.conf
+
+sudo tee /etc/resolv.conf <<EOF
+nameserver 10.0.0.200
+search so3.inet
+EOF
+
+sudo chattr +i /etc/resolv.conf
+
+ Instalar Samba y dependencias
+
+
+sudo apt update
+sudo apt install -y \
+  acl attr \
+  samba samba-dsdb-modules samba-vfs-modules \
+  smbclient winbind libpam-winbind libnss-winbind libpam-krb5 \
+  krb5-config krb5-user dnsutils chrony net-tools
+
+
+ Desactiva servicios innecesarios y activa el correcto
+
+
+sudo systemctl disable --now smbd nmbd winbind
+sudo systemctl unmask samba-ad-dc
+sudo systemctl enable --now samba-ad-dc
+
+Provisión del dominio
+
+sudo mv /etc/samba/smb.conf /etc/samba/smb.conf.orig
+
+sudo samba-tool domain provision \
+  --realm=SO3.INET \
+  --domain=SO3 \
+  --server-role=dc \
+  --dns-backend=SAMBA_INTERNAL \
+  --dns-forwarder=8.8.8.8 \
+  --adminpass='TuPasswordAdmin123'
+
+Configurar Kerberos
+
+sudo mv /etc/krb5.conf /etc/krb5.conf.orig
+sudo cp /var/lib/samba/private/krb5.conf /etc/krb5.conf
+
+
+Reiniciar y comprobar Samba
+
+sudo systemctl restart samba-ad-dc
+sudo systemctl status samba-ad-dc
+
+
+Configuración de NTP (importantísimo para Windows)
+
+sudo chown root:_chrony /var/lib/samba/ntp_signd/
+sudo chmod 750 /var/lib/samba/ntp_signd/
+
+sudo tee -a /etc/chrony/chrony.conf <<EOF
+
+# Samba AD‑DC NTP
+bindcmdaddress 192.168.1.50
+allow        192.168.1.0/24
+ntpsigndsocket /var/lib/samba/ntp_signd
+EOF
+
+sudo systemctl restart chronyd
+sudo systemctl status chronyd
+
+Verificaciones
+
+host -t A dc.so3.inet
+host -t SRV _kerberos._udp.so3.inet
+host -t SRV _ldap._tcp.so3.inet
+
+kinit administrator@SO3.INET
+klist
+
+sudo smbclient //localhost/netlogon -U 'administrator'
+
+
+Crear el usuario lanegracubana
+
+sudo samba-tool user create lanegracubana TuMatricula123 --login-shell=/bin/bash
+Verifica:
+
+bash
+Copiar
+Editar
+sudo samba-tool user list
+
+
+
+En la máquina Windows
+Antes de unirla al dominio:
+Asegúrate de configurar el DNS primario como 10.0.0.200
+
+Comprueba con nslookup desde Windows que resuelva dc.so3.inet
+
+Para unir al dominio:
+Clic derecho en “Este equipo” → Propiedades → Cambiar configuración.
+
+Cambiar el nombre del equipo si deseas.
+
+Dominar: SO3.INET
+
+Usuario: lanegracubana
+
+Contraseña: TuMatricula123
+
+Reiniciar Windows.
