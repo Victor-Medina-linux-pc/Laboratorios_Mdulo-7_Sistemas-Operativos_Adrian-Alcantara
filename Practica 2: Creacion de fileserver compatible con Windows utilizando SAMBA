@@ -1,0 +1,50 @@
+# 1) Instalar Samba y módulos
+sudo apt update && sudo apt install -y samba samba-dsdb-modules samba-vfs-modules krb5-user krb5-config krb5-kdc krb5-admin-server dnsutils
+
+# 2) Habilitar e iniciar servicios Samba clásico
+sudo systemctl enable --now smbd nmbd
+
+# 3) Grupo, carpeta y permisos (SetGID para heredar grupo)
+sudo groupadd sambashare
+sudo mkdir -p /srv/samba/adrian
+sudo chown root:sambashare /srv/samba/adrian
+sudo chmod 2775 /srv/samba/adrian
+
+# 4) Usuario Samba (sin shell), agregar al grupo y crear clave de Samba
+sudo useradd -M -d /srv/samba/adrian -s /usr/sbin/nologin adrian
+sudo usermod -aG sambashare adrian
+sudo smbpasswd -a adrian       # ponle la clave que usarás desde Windows
+
+# 5) Configurar el recurso compartido
+sudo nano /etc/samba/smb.conf
+# Deja así (reemplaza todo si hace falta):
+# ----------------------------------------
+# [global]
+#    workgroup = WORKGROUP
+#    security = user
+#    map to guest = Bad User
+#
+# [adrian]
+#    path = /srv/samba/adrian
+#    browsable = yes
+#    writable = yes
+#    valid users = @sambashare
+#    create mask = 0664
+#    directory mask = 0775
+# ----------------------------------------
+# Guardar: CTRL+O, ENTER. Salir: CTRL+X
+
+# 6) Probar sintaxis y reiniciar
+testparm
+sudo systemctl restart smbd nmbd
+
+# 7) Crear 100 archivos de prueba
+cd /srv/samba/adrian
+sudo touch adrian{1..100}
+
+# 8) (Desde Windows) Conectar a \\IP_DEL_SERVIDOR\adrian
+#    Usuario: adrian  |  Clave: (la de smbpasswd)
+#    Edita y guarda el archivo adrian99 con una frase.
+
+# 9) Verificar desde Linux que se grabó el cambio
+sudo grep -n '' /srv/samba/adrian/adrian99 || sudo ls -l /srv/samba/adrian/adrian99
